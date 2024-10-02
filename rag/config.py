@@ -17,3 +17,4 @@ class Config:
     SYSTEM_PROMPT: str = "You are a helpful AI assistant. Use the provided context to answer the user's questions."
     SIMILARITY_CUTTOFF: float = 0.2
     RERANK_TOP_K: int = 2
+    AUDIO_MODEL_PATH: str = r'C:\Users\shres\Desktop\voice\whisper'

@@ -5,7 +5,8 @@ from rag.config import Config
 from rag.manager.file_manager import FileManager
 
 from injector import Injector
-from rag.services.chat_service import ChatService  
+from rag.services.chat_service import ChatService
+from rag.services.voice_service import VoiceChatService
 from rag.manager.llm_manager import LLMManager
 from rag.manager.embed_manager import EmbeddingManager
 from rag.manager.vector_store_manager import VectorStoreManager
@@ -20,13 +21,14 @@ class GradioRAGChat:
     def __init__(self):
         # Inject necessary services
         self.chat_service = injector.get(ChatService)
+        self.voice_chat_service = injector.get(VoiceChatService)
         self.index_manager = injector.get(IndexManager)
         self.chat_history = []
 
     def upload_file(self, file):
         """Handle file upload and indexing."""
         if file is not None:
-            documents = FileManager.load_file(file.name)  # Adjust file loading as per your FileManager
+            documents = FileManager.load_file(file.name)
             if documents:
                 self.index_manager.ingest(documents)
                 return "File uploaded and indexed successfully!"
@@ -40,6 +42,15 @@ class GradioRAGChat:
         response = self.chat_service.chat(message)
         self.chat_history.append((message, response))
         return self.chat_history, self.chat_history
+
+    def voice_chat(self, audio):
+        """Process voice input, transcribe, chat, and convert response to speech."""
+        if audio is not None:
+            transcription, response = self.voice_chat_service.run_voice_chat()
+            if transcription and response:
+                self.chat_history.append((transcription, response))
+                return gr.Audio(value="output.wav", visible=True), self.chat_history, self.chat_history
+        return None, self.chat_history, self.chat_history
 
     def reset_chat(self):
         """Reset the chat history and conversation context."""
@@ -82,13 +93,22 @@ class GradioRAGChat:
                 upload_output = gr.Textbox(label="Upload Status")
                 upload_button.click(self.upload_file, inputs=file_upload, outputs=upload_output)
 
-            # Chat Tab
-            with gr.Tab("Chat"):
+            # Text Chat Tab
+            with gr.Tab("Text Chat"):
                 chatbot = gr.Chatbot(label="Chat History")
                 msg = gr.Textbox(label="Message")
                 clear = gr.Button("Clear")
                 msg.submit(self.chat, inputs=[msg, chatbot], outputs=[chatbot, chatbot])
                 clear.click(self.reset_chat, outputs=chatbot)
+
+            # Voice Chat Tab
+            with gr.Tab("Voice Chat"):
+                audio_input = gr.Audio(source="microphone", type="filepath")
+                voice_output = gr.Audio(label="AI Response", visible=False)
+                voice_chatbot = gr.Chatbot(label="Voice Chat History")
+                voice_clear = gr.Button("Clear Voice Chat")
+                audio_input.stop_recording(self.voice_chat, inputs=[audio_input], outputs=[voice_output, voice_chatbot, voice_chatbot])
+                voice_clear.click(self.reset_chat, outputs=voice_chatbot)
 
             # Footer with logo
             with gr.Row():
