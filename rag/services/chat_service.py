@@ -14,32 +14,38 @@ from rag.manager.vector_store_manager import VectorStoreManager
 from rag.manager.node_manager import NodeManager
 from llama_index.core.storage import StorageContext
 from rag.config import Config
+from rag.manager.index_manager import IndexManager
 
 @singleton
 class ChatService:
     config: Config
     @inject
-    def __init__(self,
+    def __init__(
+        self,
         config: Config,
-        llm_component: LLMManager,
-        vector_store_component: VectorStoreManager,
-        embedding_component: EmbeddingManager,
-        node_store_component: NodeManager
-        ):
+        llm_manager: LLMManager,
+        index_manager: IndexManager,
+        node_manager: NodeManager,
+        embedding_manager: EmbeddingManager,
+        vector_store_manager: VectorStoreManager,
+    ):
         self.config = config
-        self.llm = llm_component
-        self.embedding_component = embedding_component
-        self.vector_store_component = vector_store_component
+        self.llm_manager = llm_manager
+        self.index_manager = index_manager
+        self.node_manager = node_manager
+        self.vector_store_component = vector_store_manager
+        self.chat_history = []
+
         self.storage_context = StorageContext.from_defaults(
-            vector_store=vector_store_component.vector_store,
-            docstore=node_store_component.doc_store,
-            index_store=node_store_component.index_store,
+            vector_store=self.vector_store_component.vector_store,
+            docstore=self.node_manager.doc_store,
+            index_store=self.node_manager.index_store,
         )
         self.index = VectorStoreIndex.from_vector_store(
-            vector_store_component.vector_store,
+            self.vector_store_component.vector_store,
             storage_context=self.storage_context,
-            llm=llm_component.llm,
-            embed_model=embedding_component.embedding_model,
+            llm=self.llm_manager.llm,
+            embed_model=embedding_manager.embedding_model,
             show_progress=True,
         )
 
@@ -57,13 +63,13 @@ class ChatService:
         
         response_synthesizer = get_response_synthesizer(
             response_mode="compact",
-            llm=self.llm.llm,
+            llm=self.llm_manager.llm,
         )
         
         return ContextChatEngine.from_defaults(
             system_prompt=system_prompt,
             retriever=vector_index_retriever,
-            llm=self.llm.llm,
+            llm=self.llm_manager.llm,
             node_postprocessors=node_postprocessors,
             response_synthesizer=response_synthesizer,
             verbose=True,
@@ -97,7 +103,12 @@ class ChatService:
                 print("Empty response received from ContextChatEngine")
                 return "I apologize, but I couldn't generate a response based on the retrieved information. This might be due to insufficient or irrelevant context. Could you please rephrase your question or ask about a different topic?"
             
+            self.chat_history.append((message, wrapped_response.response))
             return wrapped_response.response
         except Exception as e:
             print(f"Error occurred: {str(e)}")
             return "I apologize, but an error occurred while processing your request. Please try again or contact support if the issue persists."
+
+    def reset_chat(self) -> None:
+        """Reset the chat history."""
+        self.chat_history = []

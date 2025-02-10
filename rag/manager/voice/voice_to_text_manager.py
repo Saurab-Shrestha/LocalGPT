@@ -1,34 +1,43 @@
-import torch
 import logging
+import whisper
 from injector import inject, singleton
-from transformers import AutoProcessor, AutoModelForSpeechSeq2Seq
+import numpy as np
+from scipy.io.wavfile import write
+from rag.config import Config
+from rag.manager.base_manager import BaseManager
 
 logger = logging.getLogger(__name__)
 
 @singleton
-class VoiceToTextManager:
+class VoiceToTextManager(BaseManager):
     @inject
-    def __init__(self, config) -> None:
+    def __init__(self, config: Config):
+        super().__init__(config)
         try:
-            self.processor, self.model = self.load_model(config.AUDIO_MODEL_PATH)
+            self.model = self.load_model(config.AUDIO_MODEL_PATH)
         except Exception as e:
-            logger.debug(f"Could not load the model! {e}")
-            self.processor, self.model = None, None
+            logger.error(f"Could not load the Whisper model! {e}")
+            self.model = None
 
     @staticmethod
     def load_model(model_path):
-        processor = AutoProcessor.from_pretrained(model_path)
-        model = AutoModelForSpeechSeq2Seq.from_pretrained(model_path)
-        return processor, model
+        # If model_path is provided in config, use it, otherwise use 'base'
+        model_size = model_path if model_path else "base"
+        return whisper.load_model(model_size)
 
     def transcribe_audio(self, audio_input):
-        if self.processor is None or self.model is None:
+        if self.model is None:
             logger.error("Model not loaded. Cannot transcribe audio.")
             return None
 
-        input_features = self.processor(audio_input, sampling_rate=16000, return_tensors="pt").input_features
-        self.model.eval()
-        with torch.no_grad():
-            predicted_ids = self.model.generate(inputs=input_features)
-        transcription = self.processor.batch_decode(predicted_ids, skip_special_tokens=True)[0]
-        return transcription
+        try:
+            # Save temporary file for Whisper
+            temp_file = "temp_recording.wav"
+            write(temp_file, 16000, audio_input)
+            
+            # Transcribe using Whisper
+            result = self.model.transcribe(temp_file)
+            return result["text"].strip()
+        except Exception as e:
+            logger.error(f"Error in transcription: {str(e)}")
+            return None

@@ -5,10 +5,11 @@ import logging
 from typing import Optional, List
 import pymupdf4llm
 from llama_index.core import Document
+from rag.manager.base_manager import BaseManager
 
 logger = logging.getLogger(__name__)
-
-class FileManager:
+    
+class FileManager(BaseManager):
     @staticmethod
     def save_uploaded_file(uploaded_file) -> Optional[str]:
         try:

@@ -1,81 +1,100 @@
+import tempfile
 import logging
 import sounddevice as sd
 import numpy as np
 from scipy.io.wavfile import write
 from injector import inject, singleton
+from pathlib import Path
 from rag.config import Config
 from rag.services.chat_service import ChatService
-from rag.manager.voice.voice_to_text_manager import VoiceToTextManager
 from rag.manager.voice.text_to_voice_manager import TextToVoiceManager
+from rag.manager.voice.voice_to_text_manager import VoiceToTextManager
 
 logger = logging.getLogger(__name__)
 
 @singleton
 class VoiceChatService:
     @inject
-    def __init__(self, 
-                 config: Config, 
-                 chat_service: ChatService,
-                 voice_to_text: VoiceToTextManager, 
-                 text_to_voice: TextToVoiceManager):
+    def __init__(
+        self,
+        config: Config,
+        chat_service: ChatService,
+        text_to_voice: TextToVoiceManager,
+        voice_to_text: VoiceToTextManager
+    ):
         self.config = config
         self.chat_service = chat_service
-        self.voice_to_text = voice_to_text
         self.text_to_voice = text_to_voice
+        self.voice_to_text = voice_to_text
 
-    def record_audio(self, duration=5, sample_rate=16000):
+    def record_audio(self, duration: int = 5, sample_rate: int = 16000) -> np.ndarray:
+        """Record audio from microphone."""
         logger.info(f"Recording audio for {duration} seconds...")
         audio = sd.rec(int(duration * sample_rate), samplerate=sample_rate, channels=1)
         sd.wait()
         return audio.flatten()
 
-    def transcribe_audio(self, audio):
+    def transcribe_audio(self, audio: np.ndarray) -> str | None:
+        """Transcribe audio using Whisper."""
         return self.voice_to_text.transcribe_audio(audio)
 
-    def chat(self, transcription):
-        return self.chat_service.chat(transcription)
-
-    def text_to_speech(self, text):
+    def text_to_speech(self, text: str) -> bytes | None:
+        """Convert text to speech."""
         return self.text_to_voice.text_to_speech(text)
 
-    def save_audio(self, audio, filename="output.wav", sample_rate=16000):
-        write(filename, sample_rate, audio)
-
-    def run_voice_chat(self):
+    def save_audio(self, audio: bytes | np.ndarray, filename: str = "output.wav", sample_rate: int = 16000) -> None:
+        """Save audio data to a file."""
         try:
-            # Record audio
+            if isinstance(audio, bytes):
+                write(filename, sample_rate, np.frombuffer(audio, dtype=np.float32))
+            else:
+                write(filename, sample_rate, audio)
+        except Exception as e:
+            logger.error(f"Error saving audio: {str(e)}")
+            raise
+
+    def run_voice_chat(self) -> tuple[str | None, str, str | None]:
+        """
+        Run a complete voice chat interaction.
+        Returns:
+            Tuple of (transcription, response, audio_path)
+        """
+        try:
             audio = self.record_audio(duration=self.config.RECORDING_DURATION)
             
-            # Transcribe audio to text
-            transcription = self.transcribe_audio(audio)
+            transcription = self.voice_to_text.transcribe_audio(audio)
             if not transcription:
-                logger.error("Failed to transcribe audio.")
-                return None, "I'm sorry, I couldn't understand the audio. Could you please try again?"
+                logger.error("Failed to transcribe audio")
+                return None, "I couldn't understand the audio. Could you please try again?", None
 
             logger.info(f"Transcription: {transcription}")
             
-            # Get chat response
-            response = self.chat(transcription)
+            response = self.chat_service.chat(transcription)
             if not response:
-                logger.error("Failed to generate chat response.")
-                return transcription, "I apologize, but I couldn't generate a response. Please try asking in a different way."
+                logger.error("Failed to generate chat response")
+                return transcription, "I couldn't generate a response. Please try asking differently.", None
 
             logger.info(f"Chat response: {response}")
             
-            # Convert response to speech
-            speech = self.text_to_speech(response)
-            if speech is None:
-                logger.error("Failed to convert text to speech.")
-                return transcription, response
+            # Generate speech from response
+            audio_data = self.text_to_voice.text_to_speech(response)
+            if audio_data is None:
+                logger.error("Failed to convert text to speech")
+                return transcription, response, None
 
-            # Save the response audio
-            self.save_audio(speech)
-            
-            return transcription, response
+            # Create temporary file for audio
+            try:
+                with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as temp_file:
+                    self.text_to_voice.save(temp_file.name, audio_data)
+                    logger.info(f"Saved audio response to {temp_file.name}")
+                    return transcription, response, temp_file.name
+            except Exception as e:
+                logger.error(f"Error saving audio file: {str(e)}")
+                return transcription, response, None
 
         except Exception as e:
-            logger.error(f"An error occurred during voice chat: {str(e)}")
-            return None, "I'm sorry, an error occurred. Please try again or contact support if the issue persists."
+            logger.error(f"Error in voice chat: {str(e)}")
+            return None, f"An error occurred: {str(e)}", None
 
     def streaming_voice_chat(self):
         # This method could be implemented for a streaming version of the voice chat

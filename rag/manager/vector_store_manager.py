@@ -4,16 +4,16 @@ from injector import inject, singleton
 from llama_index.core.vector_stores.types import VectorStore
 from llama_index.vector_stores.qdrant import QdrantVectorStore
 from llama_index.core.indices.vector_store import VectorIndexRetriever
-
+from rag.manager.base_manager import BaseManager
 from rag.config import Config
 
 @singleton
-class VectorStoreManager:
-    
+class VectorStoreManager(BaseManager):
     @inject
     def __init__(self, config: Config):
+        super().__init__(config)
         try:
-            client = QdrantClient(url="http://localhost:6333")
+            client = QdrantClient(":memory:")
             self.vector_store = typing.cast(
                 VectorStore,
                 QdrantVectorStore(
